@@ -79,20 +79,20 @@ jobs:
           done
           [ "$OK" = 1 ]
 
-      - name: Make IPA
+      - name: Make IPA and DEB
         run: |
+          test -f Resources/Info.plist || { echo "ERROR: Resources/Info.plist is missing from the repo"; exit 1; }
           APP=$(find .theos/_ -maxdepth 3 -name 'MusicClone.app' | head -1 || true)
-          if [ -z "$APP" ]; then
-            mkdir -p unpacked && dpkg-deb -x packages/*.deb unpacked
-            APP=$(find unpacked -name 'MusicClone.app' | head -1)
-          fi
           test -n "$APP"
+          cp -R Resources/. "$APP/"
+          test -f "$APP/Info.plist"
           echo "App bundle: $APP"
+          ls -la "$APP"
           lipo -info "$APP/MusicClone"
           mkdir -p dist/Payload
           cp -R "$APP" dist/Payload/
           (cd dist && zip -qr MusicClone.ipa Payload && rm -rf Payload)
-          cp packages/*.deb dist/
+          dpkg-deb -Zgzip -b .theos/_ dist/com.rameboi.musicclone_1.0.0_iphoneos-arm.deb
           ls -la dist
 
       - uses: actions/upload-artifact@v4
