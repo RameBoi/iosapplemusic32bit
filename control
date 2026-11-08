@@ -1,0 +1,9 @@
+Package: com.rameboi.musicclone
+Name: Music
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Apple Music (iPadOS 18 style) player for 32-bit iOS 8
+Maintainer: RameBoi
+Author: RameBoi
+Section: Multimedia
+Depends: firmware (>= 8.0)
