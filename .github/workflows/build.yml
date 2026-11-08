@@ -1,0 +1,73 @@
+name: Build MusicClone IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      sdk:
+        description: 'Force an SDK folder from theos/sdks, e.g. iPhoneOS9.3.sdk (leave empty = auto)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_1[4-6]*.app 2>/dev/null | sort -V | head -1 || true)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+          MAJOR=$(xcodebuild -version | head -1 | awk '{print $2}' | cut -d. -f1)
+          if [ "$MAJOR" -ge 15 ]; then echo "LD_CLASSIC=1" >> "$GITHUB_ENV"; fi
+
+      - name: Install Theos and tools
+        run: |
+          brew install ldid dpkg
+          git clone --recursive --depth=1 --shallow-submodules https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Get an old iOS SDK that still has armv7
+        run: |
+          git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdks
+          cd /tmp/sdks
+          LIST=$(git ls-tree --name-only HEAD | grep '^iPhoneOS' | sort -V)
+          echo "Available SDKs:"; echo "$LIST"
+          PICK="${{ github.event.inputs.sdk }}"
+          if [ -z "$PICK" ]; then
+            PICK=$(echo "$LIST" | grep -E '^iPhoneOS(9|10|11)\.' | head -1 || true)
+          fi
+          if [ -z "$PICK" ]; then PICK=$(echo "$LIST" | head -1); fi
+          echo "Using $PICK"
+          git sparse-checkout set "$PICK"
+          mkdir -p "$THEOS/sdks"
+          cp -R "$PICK" "$THEOS/sdks/"
+          VER="${PICK#iPhoneOS}"; VER="${VER%.sdk}"
+          echo "MC_SDK=$VER" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: make package FINALPACKAGE=1
+
+      - name: Make IPA
+        run: |
+          APP=$(find .theos/_ -maxdepth 3 -name 'MusicClone.app' | head -1 || true)
+          if [ -z "$APP" ]; then
+            mkdir -p unpacked && dpkg-deb -x packages/*.deb unpacked
+            APP=$(find unpacked -name 'MusicClone.app' | head -1)
+          fi
+          test -n "$APP"
+          echo "App bundle: $APP"
+          lipo -info "$APP/MusicClone"
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          (cd dist && zip -qr MusicClone.ipa Payload && rm -rf Payload)
+          cp packages/*.deb dist/
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicClone
+          path: dist/*
