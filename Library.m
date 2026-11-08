@@ -25,8 +25,8 @@
 
 + (NSArray *)recentAlbums {
     NSArray *sorted = [[self albums] sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        NSDate *da = [a[@"rep"] valueForProperty:MPMediaItemPropertyDateAdded];
-        NSDate *db = [b[@"rep"] valueForProperty:MPMediaItemPropertyDateAdded];
+        NSDate *da = [a[@"rep"] valueForProperty:@"dateAdded"];
+        NSDate *db = [b[@"rep"] valueForProperty:@"dateAdded"];
         if (!da) da = [NSDate distantPast];
         if (!db) db = [NSDate distantPast];
         return [db compare:da];
