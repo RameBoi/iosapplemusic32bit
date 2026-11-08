@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       sdk:
-        description: 'Force an SDK folder from theos/sdks, e.g. iPhoneOS9.3.sdk (leave empty = auto)'
+        description: 'Force one SDK folder from theos/sdks, e.g. iPhoneOS10.3.sdk (leave empty = try 9.3, 10.3, 11.4)'
         required: false
         default: ''
 
@@ -30,26 +30,54 @@ jobs:
           git clone --recursive --depth=1 --shallow-submodules https://github.com/theos/theos.git "$HOME/theos"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
-      - name: Get an old iOS SDK that still has armv7
+      - name: Get old iOS SDKs
         run: |
           git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdks
           cd /tmp/sdks
           LIST=$(git ls-tree --name-only HEAD | grep '^iPhoneOS' | sort -V)
           echo "Available SDKs:"; echo "$LIST"
-          PICK="${{ github.event.inputs.sdk }}"
-          if [ -z "$PICK" ]; then
-            PICK=$(echo "$LIST" | grep -E '^iPhoneOS(9|10|11)\.' | head -1 || true)
+          PICKS="${{ github.event.inputs.sdk }}"
+          if [ -z "$PICKS" ]; then
+            PICKS=$(echo "$LIST" | grep -E '^iPhoneOS(9\.3|10\.3|11\.4)\.sdk$' | tr '\n' ' ')
           fi
-          if [ -z "$PICK" ]; then PICK=$(echo "$LIST" | head -1); fi
-          echo "Using $PICK"
-          git sparse-checkout set "$PICK"
+          echo "Will try: $PICKS"
+          git sparse-checkout set $PICKS
           mkdir -p "$THEOS/sdks"
-          cp -R "$PICK" "$THEOS/sdks/"
-          VER="${PICK#iPhoneOS}"; VER="${VER%.sdk}"
-          echo "MC_SDK=$VER" >> "$GITHUB_ENV"
+          for P in $PICKS; do cp -R "$P" "$THEOS/sdks/"; done
 
-      - name: Build
-        run: make package FINALPACKAGE=1
+      - name: Build (tries each SDK until one links)
+        run: |
+          OK=0
+          for P in $(ls "$THEOS/sdks" | grep '^iPhoneOS' | sort -V); do
+            VER="${P#iPhoneOS}"; VER="${VER%.sdk}"
+            echo "=============== Trying SDK $VER ==============="
+
+            STUB="$THEOS/sdks/$P/usr/lib/system/liblaunch.tbd"
+            if [ ! -f "$STUB" ]; then
+              mkdir -p "$(dirname "$STUB")"
+              printf '%s\n' \
+                '--- !tapi-tbd-v2' \
+                'archs:           [ armv7, armv7s, arm64 ]' \
+                'platform:        ios' \
+                'install-name:    /usr/lib/system/liblaunch.dylib' \
+                'current-version: 1' \
+                'compatibility-version: 1' \
+                'exports:' \
+                '  - archs:           [ armv7, armv7s, arm64 ]' \
+                '    symbols:         [ ]' \
+                '...' > "$STUB"
+              echo "Added liblaunch stub for $P"
+            fi
+
+            make clean >/dev/null 2>&1 || true
+            if make package FINALPACKAGE=1 MC_SDK="$VER"; then
+              echo "BUILD OK with SDK $VER"
+              OK=1
+              break
+            fi
+            echo "SDK $VER failed, trying next"
+          done
+          [ "$OK" = 1 ]
 
       - name: Make IPA
         run: |
